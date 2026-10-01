@@ -1,0 +1,5 @@
+#include "fates/graphics/post_effect_context.hpp"
+#include "fates/detail/camera_execution_runtime.hpp"
+PostEffectContext::PostEffectContext()=default;
+PostEffectContext::~PostEffectContext(){ for(void*& p:buffers_) if(p){fates::decomp_detail::FreePostEffectBuffer(p);p=nullptr;} }
+void PostEffectContext::DefaultSetup(){fates::decomp_detail::PostEffectDefaultSetup(*this);} void PostEffectContext::TextureAssign(int s,const ITexture*t,unsigned int a){fates::decomp_detail::PostEffectTextureAssign(*this,s,t,a);} void PostEffectContext::TextureAssign(int s,unsigned int a,unsigned int w,unsigned int h,PicaDataTextureFormat f){(void)h;fates::decomp_detail::PostEffectTextureAssignRaw(*this,s,a,w,h,static_cast<unsigned int>(f));} void PostEffectContext::InitBeforeDraw(int w,int h){fates::decomp_detail::PostEffectInitBeforeDraw(*this,w,h);} void PostEffectContext::TevSetGaussPass1(int a,int b,int c){fates::decomp_detail::PostEffectGaussPass1(*this,a,b,c);} void PostEffectContext::TevSetGaussPass2(int a,int b,int c){fates::decomp_detail::PostEffectGaussPass2(*this,a,b,c);} void PostEffectContext::DrawQuads(int w,int h){fates::decomp_detail::PostEffectDrawQuads(*this,w,h);}

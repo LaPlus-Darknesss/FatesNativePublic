@@ -1,0 +1,70 @@
+#include "fates/ai/ai_decision_spine.hpp"
+
+namespace fates::ai::reconstruction {
+
+void AIOrder_AttackHigh(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_AttackHigh); }
+void AIOrder_Processing(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_Processing); }
+void AIOrder_CheerNoMove(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_CheerNoMove); }
+void AIOrder_EntrustHeal(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EntrustHeal); }
+void AIOrder_EntrustMove(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EntrustMove); }
+void AIOrder_EnumerateAttack(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EnumerateAttack); }
+void AIOrder_SortDescend(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_SortDescend); }
+void AIOrder_AttackMiddle(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_AttackMiddle); }
+void AIOrder_UpdateTarget(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_UpdateTarget); }
+void AIOrder_EntrustAttack(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EntrustAttack); }
+void AIOrder_EnumerateMove(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EnumerateMove); }
+void AIOrder_AttackCrossfire(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_AttackCrossfire); }
+void AIOrder_AttackLongRange(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_AttackLongRange); }
+void AIOrder_EnumerateEntrust(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EnumerateEntrust); }
+void AIOrder_EntrustUpdateIdle(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EntrustUpdateIdle); }
+void AIOrder_AttackInterference(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_AttackInterference); }
+void AIOrder_EntrustHeroRushMove(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EntrustHeroRushMove); }
+void AIOrder_CheerInsteadOfAttack(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_CheerInsteadOfAttack); }
+void AIOrder_EnumerateAttackLongRange(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EnumerateAttackLongRange); }
+void AIOrder_EnumerateAttackInterference(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_EnumerateAttackInterference); }
+void AIOrder_Mind(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_Mind); }
+void AIOrder_Move(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_Move); }
+void AIOrder_Next(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_Next); }
+void AIOrder_Cause(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_Cause); }
+void AIOrder_GetUnit(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_GetUnit); }
+void AIOrder_TurnEnd(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_TurnEnd); }
+void AIOrder_Priority(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_Priority); }
+void AIOrder_AllowIdle(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_AllowIdle); }
+void AIOrder_AttackLow(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_AttackLow); }
+void AIOrder_CheerMove(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_CheerMove); }
+void AIOrder_GaleFixed(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_GaleFixed); }
+void AIOrder_Construct(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIOrder_Construct); }
+void AIThink_HasHealRod(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_HasHealRod); }
+void AIThink_IsMoveNear(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_IsMoveNear); }
+void AIThink_IsMoveOver(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_IsMoveOver); }
+void AIThink_IsMoveOver2(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_IsMoveOver2); }
+void AIThink_Processing(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_Processing); }
+void AIThink_GetDualScore(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetDualScore); }
+void AIThink_UpdateTarget(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_UpdateTarget); }
+void AIThink_GetAttackRange(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetAttackRange); }
+void AIThink_GetAttackScore(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetAttackScore); }
+void AIThink_GetDestroyScore(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetDestroyScore); }
+void AIThink_GetHealRodRange(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetHealRodRange); }
+void AIThink_GetSidePosition(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetSidePosition); }
+void AIThink_GetTerrainScore(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetTerrainScore); }
+void AIThink_IsActiveCommand(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_IsActiveCommand); }
+void AIThink_UpdateTargetOne(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_UpdateTargetOne); }
+void AIThink_GetItemIndexHeal(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetItemIndexHeal); }
+void AIThink_GetMovePowerSlow(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetMovePowerSlow); }
+void AIThink_HasActiveCommand(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_HasActiveCommand); }
+void AIThink_IsEscapePosition(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_IsEscapePosition); }
+void AIThink_ProcessingActive(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_ProcessingActive); }
+void AIThink_ProcessingResult(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_ProcessingResult); }
+void AIThink_GetAttackPosition(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetAttackPosition); }
+void AIThink_IsDualSupportUnit(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_IsDualSupportUnit); }
+void AIThink_ProcessingEntrust(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_ProcessingEntrust); }
+void AIThink_GetDestroyPosition(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetDestroyPosition); }
+void AIThink_GetHealRodPosition(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_GetHealRodPosition); }
+void AIThink_IsAttackPermission(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_IsAttackPermission); }
+void AIThink_IsAttackPermission2(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_IsAttackPermission2); }
+void AIThink_Action(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_Action); }
+void AIThink_MoveTo(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_MoveTo); }
+void AIThink_Update(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_Update); }
+void AIThink_AttackTo(RuntimeBoundary& boundary) { boundary.Invoke(RetailOperation::AIThink_AttackTo); }
+
+} // namespace fates::ai::reconstruction

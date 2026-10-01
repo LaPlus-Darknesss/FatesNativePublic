@@ -1,0 +1,65 @@
+#include "fates/event/native_commands.hpp"
+
+namespace fates::event::native {
+// Presentation-facing effects, movies, audio, field objects and miracle/
+// band transitions.  Gameplay-visible ordering is preserved while proprietary
+// rendering/audio implementation details remain replaceable backend territory.
+
+#define FATES_EVENT_NATIVE_WRAPPER(Name) \
+NativeWord Name(NativeCommandRuntime& runtime, cmvm::CmContext* context, const NativeWord* args, std::size_t argc) { \
+    return InvokeNative(runtime, "ev::" #Name, context, args, argc); \
+}
+
+FATES_EVENT_NATIVE_WRAPPER(EffectPlay3D)
+FATES_EVENT_NATIVE_WRAPPER(EffectPlayEternal3D)
+FATES_EVENT_NATIVE_WRAPPER(EffectPlayUnit)
+FATES_EVENT_NATIVE_WRAPPER(EffectRotate)
+FATES_EVENT_NATIVE_WRAPPER(EffectFadeOut)
+FATES_EVENT_NATIVE_WRAPPER(EffectDelete)
+FATES_EVENT_NATIVE_WRAPPER(EffectIsPreload)
+FATES_EVENT_NATIVE_WRAPPER(EffectIsPlaying)
+FATES_EVENT_NATIVE_WRAPPER(EffectHideTrick)
+FATES_EVENT_NATIVE_WRAPPER(EffectShowTrick)
+FATES_EVENT_NATIVE_WRAPPER(MoviePlayImpl)
+FATES_EVENT_NATIVE_WRAPPER(MovieStop)
+FATES_EVENT_NATIVE_WRAPPER(MovieIsExist)
+FATES_EVENT_NATIVE_WRAPPER(MovieIsPaused)
+FATES_EVENT_NATIVE_WRAPPER(MovieIsSkipped)
+FATES_EVENT_NATIVE_WRAPPER(MovieEnablePauseAtEnd)
+FATES_EVENT_NATIVE_WRAPPER(MovieDisablePauseAtEnd)
+FATES_EVENT_NATIVE_WRAPPER(BGMPlay)
+FATES_EVENT_NATIVE_WRAPPER(BGMStop)
+FATES_EVENT_NATIVE_WRAPPER(RBGMPlay)
+FATES_EVENT_NATIVE_WRAPPER(RBGMStop)
+FATES_EVENT_NATIVE_WRAPPER(RBGMEffect)
+FATES_EVENT_NATIVE_WRAPPER(BGMVolume)
+FATES_EVENT_NATIVE_WRAPPER(SEPlay)
+FATES_EVENT_NATIVE_WRAPPER(SEPlay3D)
+FATES_EVENT_NATIVE_WRAPPER(Voice)
+FATES_EVENT_NATIVE_WRAPPER(EnvSEOff)
+FATES_EVENT_NATIVE_WRAPPER(EnvSEOn)
+FATES_EVENT_NATIVE_WRAPPER(VoiceArchiveLoad)
+FATES_EVENT_NATIVE_WRAPPER(VoiceArchiveFree)
+FATES_EVENT_NATIVE_WRAPPER(MiracleTelop)
+FATES_EVENT_NATIVE_WRAPPER(MiracleShoot)
+FATES_EVENT_NATIVE_WRAPPER(MiracleShootXY)
+FATES_EVENT_NATIVE_WRAPPER(MiracleGetShootX)
+FATES_EVENT_NATIVE_WRAPPER(MiracleGetShootY)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectPlayState)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectSetState)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectSetVisible)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectSetEscape)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectCreate)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectDelete)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectMove)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectMoveEx)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectWarp)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectFadeOut)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectPlayAnime)
+FATES_EVENT_NATIVE_WRAPPER(FieldObjectPlayEffect)
+FATES_EVENT_NATIVE_WRAPPER(BandOpen)
+FATES_EVENT_NATIVE_WRAPPER(BandClose)
+FATES_EVENT_NATIVE_WRAPPER(CrossFade)
+
+#undef FATES_EVENT_NATIVE_WRAPPER
+} // namespace fates::event::native

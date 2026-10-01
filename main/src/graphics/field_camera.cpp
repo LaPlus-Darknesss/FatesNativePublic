@@ -1,0 +1,3 @@
+#include "fates/graphics/field_camera.hpp"
+#include "fates/detail/principal_camera_runtime.hpp"
+FieldCamera::FieldCamera(){fates::decomp_detail::RegisterFieldCamera(this);} FieldCamera::~FieldCamera(){fates::decomp_detail::UnregisterFieldCamera(this);} void FieldCamera::UpdateProj(){fates::decomp_detail::FieldCameraUpdateProjection(*this);} void FieldCamera::UpdateView(){fates::decomp_detail::FieldCameraUpdateView(*this);} void FieldCamera::Tick(float dt){fates::decomp_detail::FieldCameraTick(*this,dt);} bool FieldCamera::IsBindControl()const{return fates::decomp_detail::FieldCameraControlBound(*this);}
