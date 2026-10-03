@@ -300,3 +300,36 @@ std::unique_ptr<ProcessContinuation> NativeGameSkip::Begin(const ProcessCall& c)
     return next;
 }
 }
+
+namespace fates::runtime::native {
+bool NativeGameSkip::UsesInput(const GameSkipInputSource& source) const noexcept {return state_->input.get()==&source;}
+}
+
+namespace fates::runtime::native {
+GameSkipStatus NativeGameSkip::DisableCurrent(ProcessAccess& access) {
+    const auto status=state_->Mutable(&access);if(status!=GameSkipStatus::Ready)return status;
+    if(!state_->CurrentKnown())return GameSkipStatus::UnknownCurrent;
+    if(auto* row=state_->Find(*state_->current))row->flags|=1u;
+    return GameSkipStatus::Ready;
+}
+}
+
+namespace fates::runtime::native {
+GameSkipStatus NativeGameSkip::SetSavedFadeGoal(ProcessAccess& access,GameSkipHandle handle,
+    std::uint32_t target,presentation::native::FadeColor color) {
+    if(const auto result=state_->Mutable(&access);result!=GameSkipStatus::Ready)return result;
+    auto* row=state_->Find(handle);if(!row || target>=2)return GameSkipStatus::InvalidHandle;
+    row->saved_goals[target]=color;return GameSkipStatus::Ready;
+}
+bool NativeGameSkip::UsesFadeSystem(const presentation::native::NativeFadeSystem& fade)const noexcept {
+    return state_->fade.get()==&fade;
+}
+}
+
+namespace fates::runtime::native {
+GameSkipStatus NativeGameSkip::MergeFlags(ProcessAccess& access,GameSkipHandle handle,std::uint32_t bits) {
+    if(auto status=state_->Mutable(&access);status!=GameSkipStatus::Ready)return status;
+    auto* row=state_->Find(handle);if(!row)return GameSkipStatus::InvalidHandle;
+    row->flags|=bits;return GameSkipStatus::Ready;
+}
+}

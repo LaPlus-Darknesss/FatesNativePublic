@@ -7,6 +7,7 @@
 #include "fates/event/native_unit_event_queries.hpp"
 #include "fates/map/native_camera_wait.hpp"
 #include "fates/event/native_event_camera.hpp"
+#include "fates/event/native_event_talk.hpp"
 #include <optional>
 #include <string>
 
@@ -32,11 +33,14 @@ struct NativeEventServices {
     std::shared_ptr<const NativeUnitEventQueries> units;
     std::shared_ptr<map::native::NativeCameraWait> camera;
     std::shared_ptr<NativeEventCamera> camera_commands;
+    std::shared_ptr<NativeEventTalk> talk;
     bool UsesOneRuntime() const noexcept {
         const runtime::native::NativeRuntime* owner=nullptr;
         const auto check=[&](const auto& service){if(!service)return true;const auto* r=service->runtime().get();
-            if(owner && owner!=r)return false;owner=r;return true;};
-        return check(phase)&&check(flags)&&check(units)&&check(camera)&&check(camera_commands);
+            if(owner && owner!=r)return false;
+            owner=r;return true;};
+        return check(phase)&&check(flags)&&check(units)&&check(camera)&&check(camera_commands) &&
+            (!owner || !talk || talk->UsesRuntime(*owner));
     }
 };
 enum class PhaseVmStatus : std::uint8_t {
@@ -46,7 +50,7 @@ enum class PhaseVmStatus : std::uint8_t {
     ScriptCallOwnerRequired, InterpreterMismatch, InvalidFunction, InvalidCall,
     FrameLimit, DanglingLocal, NativeCallOwnerRequired, InvalidNativeArguments,
     NativeStateUnavailable, StaleNativeContext, DivisionByZero, StaleScriptSession,
-    MismatchedNativeContext, ContextNotReturned
+    MismatchedNativeContext, ContextNotReturned, NativeCallPending
 };
 struct RetainedVmArchiveAddress {
     std::shared_ptr<const PhaseEventArchive> archive;
@@ -77,6 +81,8 @@ struct PhaseVmObservation {
     std::uint64_t native_cameras{};
     std::optional<EventCameraStatus> native_camera_command_status;
     std::uint64_t native_camera_commands{};
+    std::optional<runtime::native::TalkControlStatus> native_talk_status;
+    std::uint64_t native_talk_calls{};
 };
 
 // Owns the selected phase function and its retained nested script frames.
@@ -142,6 +148,10 @@ public:
     PhaseEventVm& operator=(const PhaseEventVm&) = delete;
     PhaseVmObservation Run(std::size_t instruction_budget);
     PhaseVmObservation Run(std::size_t instruction_budget,const ProcEventVmAccess&);
+    // Only the current ProcEvent callback can consume this already-prepared
+    // nested service. The VM commits its native opcode after that service has
+    // actually returned, retaining operands/PC across all nested barriers.
+    std::optional<runtime::native::ProcessCall> PendingNativeCall(const ProcEventVmAccess&) const;
     // SetFunction on this same context/stack after an outer return. Both the old
     // and next attachment must still belong to this session. Rejection leaves
     // the context and observation untouched. Locals do not inherit value tags.

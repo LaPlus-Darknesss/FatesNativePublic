@@ -67,6 +67,69 @@ UnitPersonLookupResult FindUnitFromPerson(const DefinitionStore& definitions,con
     }
     return result;
 }
+PlayerUnitLookupResult NativePlayerUnitSelector::Find(const DefinitionStore& definitions,
+    const NativeGameState& game) {
+    using L=PlayerUnitLookupStatus;using A=ArchiveIdentifierStatus;
+    PlayerUnitLookupResult result;
+    if(!mask_) {
+        // Literal SPID_Player from4F6430, read through the SAME shared index as
+        // other archive labels. A host definition's numeric ID is not authority
+        // for whichever value the actual first-hash lookup currently returns.
+        const auto flag=identifiers_.ReadWord("SPID_\x83\x76\x83\x8c\x83\x43\x83\x84\x81\x5b");
+        switch(flag.status) {
+        case A::Ready:break;
+        case A::Missing:result.status=L::MissingPlayerFlag;return result;
+        case A::Retired:result.status=L::RetiredRegistry;return result;
+        case A::StaleValue:result.status=L::StalePlayerFlag;return result;
+        default:result.status=L::InvalidPlayerFlag;return result;
+        }
+        // The private-flag domain is64 bits. Invalid metadata is not a reason
+        // to reproduce the vendor shift helper's out-of-domain register quirks.
+        if(flag.value>=64){result.status=L::InvalidPlayerFlag;return result;}
+        mask_=std::uint64_t{1}<<flag.value;
+    }
+    const auto bits=[](const std::array<std::uint8_t,8>& bytes) {
+        std::uint64_t value{};
+        for(unsigned i=0;i<8;++i)value|=std::uint64_t(bytes[i])<<(8*i);
+        return value;
+    };
+    for(std::uint16_t slot=0;slot<game.units.size();++slot) {
+        ++result.slots_examined;++result.uniqueness_checks;
+        const auto& unit=game.units[slot];
+        const auto refuse=[&](L status) {
+            result.status=status;result.unavailable_slot=slot;return result;
+        };
+        // IsUnique precedes even the Force check. A prior out-of-force download
+        // unit can therefore require its Person/archive owner before the match.
+        if(unit.flags&0x40000u)continue;
+        const PersonDefinition* person{};
+        if(unit.flags&0x10000000u) {
+            ++result.download_checks;
+            if(!unit.person_record)return refuse(L::MissingPerson);
+            person=definitions.ResolvePerson(unit.person_record);
+            if(!person || person->id!=unit.person_id)return refuse(L::StalePerson);
+            const auto download=definitions.IsPersonDownload(*person);
+            if(!download)return refuse(L::UnknownPersonArchives);
+            if(!*download)continue;
+        }
+        ++result.force_checks;
+        if(unit.force_type>9)return refuse(L::InvalidUnit);
+        // Force::GetMaskSameForceWithDefection(0), original literal39.
+        if(!(0x39u&(1u<<unit.force_type)))continue;
+        if(!unit.occupied)return refuse(L::InvalidUnit);
+        ++result.flag_checks;
+        if(!person) {
+            if(!unit.person_record)return refuse(L::MissingPerson);
+            person=definitions.ResolvePerson(unit.person_record);
+            if(!person || person->id!=unit.person_id)return refuse(L::StalePerson);
+        }
+        const auto* job=definitions.FindJob(unit.job_id);
+        if(!job)return refuse(L::MissingJob);
+        if(!((bits(unit.private_skill_bits)|bits(person->bitflags)|bits(job->bitflags))&*mask_))continue;
+        result.slot=slot;return result;
+    }
+    return result;
+}
 UnitClearPlan PlanUnitClearExact(UnitClearPresence f) noexcept {
     UnitClearPlan p{};auto add=[&](E e){p.effects[p.count++]=e;};
     if(f.edit){add(E::RemoveEditPrivateFlag);add(E::DeleteEdit);}

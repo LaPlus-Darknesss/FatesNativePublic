@@ -3,6 +3,40 @@
 #include <algorithm>
 
 namespace fates::runtime::native {
+ArchiveLabelTableStatus ReadArchiveLabelTable(std::span<const std::uint8_t> b,ArchiveLabelTable& out) {
+    using S=ArchiveLabelTableStatus;
+    auto word=[&](std::size_t at){return std::uint32_t(b[at])|(std::uint32_t(b[at+1])<<8)|
+        (std::uint32_t(b[at+2])<<16)|(std::uint32_t(b[at+3])<<24);};
+    if(b.size()<0x20)return S::InvalidHeader;
+    if(b.size()>16u*1024u*1024u)return S::LimitExceeded;
+    if(word(0)!=b.size())return S::InvalidHeader;
+    if(b[0x1f] || std::equal(b.begin()+0x18,b.begin()+0x1f,"HSDArc"))return S::ConstructedImage;
+    ArchiveLabelTable next;
+    next.data_bytes=word(4)&~3u;next.relocation_count=word(8);
+    const std::size_t count=word(12),aux=word(16);
+    if(count>65536)return S::LimitExceeded;
+    if(next.data_bytes>b.size()-0x20)return S::InvalidTable;
+    const auto relocations=0x20+next.data_bytes;
+    if(next.relocation_count>(b.size()-relocations)/4)return S::InvalidTable;
+    for(std::size_t i=0;i<next.relocation_count;++i) {
+        const std::size_t at=word(relocations+4*i)&~3u;
+        if(at>next.data_bytes || next.data_bytes-at<4)return S::InvalidTable;
+    }
+    const auto table=relocations+next.relocation_count*4;
+    const auto available=(b.size()-table)/8;
+    if(count>available || aux>available-count)return S::InvalidTable;
+    const auto strings=table+(count+aux)*8;
+    next.entries.reserve(count);
+    for(std::size_t i=0;i<count;++i) {
+        const std::size_t value=word(table+i*8)&~3u,name=word(table+i*8+4);
+        if(value>next.data_bytes || name>=b.size()-strings)return S::InvalidLabel;
+        const auto at=strings+name;auto end=at;
+        while(end<b.size() && b[end])++end;
+        if(end==b.size())return S::InvalidLabel;
+        next.entries.push_back({std::string(reinterpret_cast<const char*>(b.data()+at),end-at),value});
+    }
+    out=std::move(next);return S::Ready;
+}
 ArchiveLabelResult FindArchiveLabel(std::span<const std::uint8_t> b,std::string_view label) {
     auto fits=[&](std::size_t at,std::size_t count){return at<=b.size()&&count<=b.size()-at;};
     auto word=[&](std::size_t at){return std::uint32_t(b[at])|(std::uint32_t(b[at+1])<<8)|(std::uint32_t(b[at+2])<<16)|(std::uint32_t(b[at+3])<<24);};

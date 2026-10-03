@@ -55,6 +55,10 @@ struct PersonDefinition {
     std::array<std::uint16_t,3> personal_skills{};
     std::array<std::uint16_t,2> reclasses{};
     std::uint8_t level_cap{}, body_type{};
+    // Parsed pointer presence, independent of string contents. Null and
+    // nonnull-empty select different original Person name branches. A hand
+    // supplied legacy definition must explicitly attest these before use.
+    std::optional<bool> fid_present, name_message_present;
 };
 
 // Ordered original Reliance rows; Paragon calls the threshold word "type".

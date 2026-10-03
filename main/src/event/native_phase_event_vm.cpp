@@ -44,6 +44,12 @@ struct PhaseEventVm::State {
     std::shared_ptr<const NativeUnitEventQueries> units;
     std::shared_ptr<map::native::NativeCameraWait> camera;
     std::shared_ptr<NativeEventCamera> camera_commands;
+    std::shared_ptr<NativeEventTalk> talk;
+    EventTalkRequest pending_talk;
+    const std::byte* pending_talk_pc{};
+    std::size_t pending_talk_base{};
+    cmvm::VmWord pending_talk_argument{};
+    ~State(){if(talk && pending_talk)talk->Forget(pending_talk);}
     std::shared_ptr<const cmvm::native::ScriptAttachmentSession> session;
     // Individually allocated frames keep saved CmFunctionView pointers stable.
     std::vector<std::unique_ptr<Frame>> frames;
@@ -336,9 +342,54 @@ struct PhaseEventVm::State {
         tags[base]=invocation.outcome.value?WordTag{WordKind::Integer,0,{}}:WordTag{};
         ++o.native_camera_commands;Observe();return PhaseVmStatus::Ready;
     }
+    PhaseVmStatus NativeTalk(std::size_t top,const ProcEventVmAccess* access) {
+        auto& o=observation;
+        if(o.call_arguments!=1 || top==0)return PhaseVmStatus::InvalidNativeArguments;
+        const auto base=top-1;
+        if(tags[base].kind!=WordKind::ArchiveAddress)return PhaseVmStatus::InvalidNativeArguments;
+        const auto valid=CheckValue(tags[base],stack[base]);if(valid!=PhaseVmStatus::Ready)return valid;
+        if(!access)return PhaseVmStatus::NativeStateUnavailable;
+        if(!pending_talk){
+            const auto bytes=tags[base].archive->bytes();
+            const auto offset=static_cast<std::uintptr_t>(stack[base])-reinterpret_cast<std::uintptr_t>(bytes.data());
+            auto end=offset;while(end<bytes.size() && bytes[end]!=0)++end;
+            if(end==bytes.size())return PhaseVmStatus::InvalidString;
+            const auto status=talk->Prepare(access->current_event(),
+                std::string_view(reinterpret_cast<const char*>(bytes.data()+offset),end-offset),
+                o.registered_identifier=="ev::TalkNoShadowFrame",pending_talk,&access->process_access());
+            o.native_talk_status=status;
+            if(status!=runtime::native::TalkControlStatus::Ready)return PhaseVmStatus::NativeStateUnavailable;
+            pending_talk_pc=context.instruction;pending_talk_base=base;pending_talk_argument=stack[base];
+        }
+        if(context.instruction!=pending_talk_pc || base!=pending_talk_base || stack[base]!=pending_talk_argument)
+            return PhaseVmStatus::InterpreterMismatch;
+        const auto outcome=talk->Observe(pending_talk);
+        if(!outcome || outcome->caller!=access->current_event())return PhaseVmStatus::StaleNativeContext;
+        o.native_talk_status=outcome->status;
+        if(!outcome->completed)return PhaseVmStatus::NativeCallPending;
+        struct Invocation {cmvm::VmWord argument{};bool request_yield{};unsigned calls{};bool valid{true};};
+        Invocation call{stack[base],outcome->request_yield};
+        cmvm::CmFunctionView function;function.native=true;
+        cmvm::RuntimeHooks hooks;hooks.resolved_native_call=&function;hooks.native_user=&call;
+        hooks.invoke_native=[](void* user,cmvm::CmContextState& ctx,const cmvm::VmWord* args,std::size_t count)->cmvm::VmWord {
+            auto& invocation=*static_cast<Invocation*>(user);
+            if(++invocation.calls!=1 || count!=1 || !args || args[0]!=invocation.argument)invocation.valid=false;
+            if(invocation.request_yield)ctx.yielded=true;
+            // Void native result: zero is interpreter storage only, not known
+            // returned game data. Its WordTag below is deliberately Unknown.
+            return 0;
+        };
+        const auto before=context;const auto result=cmvm::step_instruction(context,hooks);++o.instructions;
+        if(result!=cmvm::StepResult::Continue || !call.valid || call.calls!=1 ||
+           context.instruction!=before.instruction+4 || context.stack_top!=stack.data()+base+1 || stack[base]!=0 ||
+           context.yielded!=call.request_yield)return PhaseVmStatus::InterpreterMismatch;
+        tags[base]=WordTag{};talk->Forget(pending_talk);pending_talk.reset();pending_talk_pc=nullptr;
+        ++o.native_talk_calls;Observe();return context.yielded?PhaseVmStatus::Yielded:PhaseVmStatus::Ready;
+    }
     PhaseVmStatus NativeQuery(std::size_t top,const ProcEventVmAccess* access) {
         auto& o=observation;
         if(camera && o.registered_identifier=="ev::CameraWait")return NativeCamera(top,access);
+        if(talk && (o.registered_identifier=="ev::Talk" || o.registered_identifier=="ev::TalkNoShadowFrame"))return NativeTalk(top,access);
         if(camera_commands && o.registered_identifier=="ev::CameraSetAngle")return NativeCameraCommand(top,access,false);
         if(camera_commands && o.registered_identifier=="ev::CameraSetDistanceFromNear")return NativeCameraCommand(top,access,true);
         if(flags && NativeEventFlagCommands::Recognizes(o.registered_identifier))return NativeFlag(top);
@@ -386,6 +437,10 @@ struct PhaseEventVm::State {
         const auto bytes=owner->bytes();
         const auto pc=std::size_t(o.code_offset);
         const auto top=static_cast<std::size_t>(context.stack_top-stack.data());
+        // A native function was already resolved before yielding to the shared
+        // scheduler. Resume that call, not a fresh identifier lookup that could
+        // dispatch a different script after an attachment changed mid-call.
+        if(pending_talk)return NativeTalk(top,access);
         const auto depth=top-frame.floor;
         if (!Fits(pc,1,bytes.size())) return PhaseVmStatus::CodeBounds;
         const auto op=bytes[pc]; o.opcode=op;
@@ -573,7 +628,7 @@ PhaseVmStatus PhaseEventVm::CreateWithServices(const PhaseEventSelection& select
     if(services.phase && services.phase->Validate()!=PhaseQueryStatus::Ok)return PhaseVmStatus::StaleNativeContext;
     auto state=std::make_unique<State>();
     state->selected=selected;state->registry=std::move(registry);state->queries=std::move(services.phase);
-    state->flags=std::move(services.flags);state->units=std::move(services.units);state->camera=std::move(services.camera);state->camera_commands=std::move(services.camera_commands);
+    state->flags=std::move(services.flags);state->units=std::move(services.units);state->camera=std::move(services.camera);state->camera_commands=std::move(services.camera_commands);state->talk=std::move(services.talk);
     std::shared_ptr<const cmvm::native::ScriptFunctionTable> table;
     if (cmvm::native::ScriptFunctionTable::Read(selected.archive(),table)!=cmvm::native::ScriptFunctionStatus::Ok)
         return PhaseVmStatus::InvalidFunction;
@@ -593,7 +648,7 @@ PhaseVmStatus PhaseEventVm::CreateRoot(const cmvm::native::ScriptFunctionRef& re
     if(state->queries && state->queries->Validate()!=PhaseQueryStatus::Ok)return PhaseVmStatus::StaleNativeContext;
     if(state->flags && state->flags->Validate()!=runtime::native::EventFlagStatus::Ok)return PhaseVmStatus::StaleNativeContext;
     if(state->units && state->units->Validate()!=UnitEventQueryStatus::Ok)return PhaseVmStatus::StaleNativeContext;
-    if(!NativeEventServices{state->queries,state->flags,state->units,state->camera,state->camera_commands}.UsesOneRuntime())
+    if(!NativeEventServices{state->queries,state->flags,state->units,state->camera,state->camera_commands,state->talk}.UsesOneRuntime())
         return PhaseVmStatus::MismatchedNativeContext;
     state->root=reference;state->stack.resize(words);state->tags.resize(words);
     for(std::size_t i=0;i<argc;++i) {
@@ -651,7 +706,7 @@ PhaseVmStatus PhaseEventVm::CreateAttachedFunctionWithServices(const cmvm::nativ
     if(!session || !selected || !session->IsAttached(selected.attachment()) ||
         selected.attachment().table()!=selected.function().table())return PhaseVmStatus::StaleScriptSession;
     auto state=std::make_unique<State>();state->session=std::move(session);state->queries=std::move(services.phase);
-    state->flags=std::move(services.flags);state->units=std::move(services.units);state->camera=std::move(services.camera);state->camera_commands=std::move(services.camera_commands);
+    state->flags=std::move(services.flags);state->units=std::move(services.units);state->camera=std::move(services.camera);state->camera_commands=std::move(services.camera_commands);state->talk=std::move(services.talk);
     std::unique_ptr<PhaseEventVm> next;
     const auto status=CreateRoot(selected.function(),arguments,words,std::move(state),next);
     if(status!=PhaseVmStatus::Ready)return status;
@@ -686,7 +741,7 @@ PhaseVmStatus PhaseEventVm::RetargetAttachedFunction(const cmvm::native::Attache
     s.frames.push_back(std::move(frame));++s.next_frame;
     s.root=selected.function();s.root_attachment=selected.attachment();s.selected={};
     auto& o=s.observation;o.status=PhaseVmStatus::Ready;o.opcode.reset();o.identifier.clear();
-    o.call_index=0;o.call_arguments=0;o.registered_identifier.clear();o.native_query_status.reset();o.native_flag_status.reset();o.native_unit_result.reset();o.native_camera_status.reset();o.native_camera_command_status.reset();
+    o.call_index=0;o.call_arguments=0;o.registered_identifier.clear();o.native_query_status.reset();o.native_flag_status.reset();o.native_unit_result.reset();o.native_camera_status.reset();o.native_camera_command_status.reset();o.native_talk_status.reset();
     s.Observe();return PhaseVmStatus::Ready;
 }
 PhaseVmObservation PhaseEventVm::Run(std::size_t budget) {return RunImpl(budget,nullptr);}
@@ -694,7 +749,7 @@ PhaseVmObservation PhaseEventVm::Run(std::size_t budget,const ProcEventVmAccess&
 PhaseVmObservation PhaseEventVm::RunImpl(std::size_t budget,const ProcEventVmAccess* access) {
     auto& o=state_->observation;
     if (o.status!=PhaseVmStatus::Ready && o.status!=PhaseVmStatus::InstructionBudget &&
-        o.status!=PhaseVmStatus::Yielded && o.status!=PhaseVmStatus::NativeStateUnavailable &&
+        o.status!=PhaseVmStatus::Yielded && o.status!=PhaseVmStatus::NativeStateUnavailable && o.status!=PhaseVmStatus::NativeCallPending &&
         !(state_->session && (o.status==PhaseVmStatus::IdentifierCallOwnerRequired ||
             o.status==PhaseVmStatus::NativeCallOwnerRequired))) return o;
     if(!state_->SessionValid()){o.status=PhaseVmStatus::StaleScriptSession;return o;}
@@ -718,6 +773,13 @@ PhaseVmObservation PhaseEventVm::RunImpl(std::size_t budget,const ProcEventVmAcc
     }
     o.status=PhaseVmStatus::InstructionBudget;
     return o;
+}
+std::optional<runtime::native::ProcessCall> PhaseEventVm::PendingNativeCall(const ProcEventVmAccess& access)const {
+    const auto& s=*state_;
+    if(s.observation.status!=PhaseVmStatus::NativeCallPending || !s.SessionValid() || !s.talk || !s.pending_talk)return {};
+    const auto row=s.talk->Observe(s.pending_talk);
+    if(!row || row->caller!=access.current_event())return {};
+    return s.talk->Call(s.pending_talk);
 }
 const PhaseVmObservation& PhaseEventVm::observation() const noexcept { return state_->observation; }
 const cmvm::native::ScriptFunctionRef& PhaseEventVm::root_function() const noexcept {return state_->root;}

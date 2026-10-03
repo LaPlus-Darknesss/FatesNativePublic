@@ -7,7 +7,8 @@ enum class UnitCapabilityStatus : std::uint8_t {
     Ok,InvalidUnit,InvalidCapability,MissingDefinition,MissingPersonality,
     UnboundLineage,StaleLineage,UnboundCapability,StaleCapability,UnboundEnhance,
     UnresolvedSkill,AlreadyBound,RevisionExhausted,UnboundInventory,StaleInventory,
-    MissingItemDefinition,MalformedPair,UnresolvedPairBonus,UnresolvedHeldEnhancement
+    MissingItemDefinition,MalformedPair,UnresolvedPairBonus,UnresolvedHeldEnhancement,
+    InvalidEditState
 };
 struct UnitCapabilityResult {
     UnitCapabilityStatus status{UnitCapabilityStatus::Ok};

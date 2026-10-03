@@ -14,6 +14,9 @@ class GameSkipInputSource {
 public:
     virtual ~GameSkipInputSource()=default;
     virtual std::optional<std::uint32_t> TriggerButtons() const=0;
+    // Original input word +0C, distinct from trigger word +14. Existing users
+    // need no held-state projection; unknown is never assumed unpressed.
+    virtual std::optional<std::uint32_t> HeldButtons() const {return std::nullopt;}
     virtual std::optional<GameSkipTutorialView> Tutorial() const=0;
 };
 class GameSkipAudioSink {
@@ -93,6 +96,8 @@ public:
     std::optional<ProcessCall> Call(ProcessHandle,GameSkipHandle,GameSkipOperation) const;
     std::optional<ProcessCall> ControlCall(ProcessHandle,GameSkipControlHandle,GameSkipControlOperation) const;
     std::optional<GameSkipHandle> Current() const;
+    // ProcTalkManager::DisableSkip: actual current flags|=1; known absence no-op.
+    GameSkipStatus DisableCurrent(ProcessAccess&);
     std::optional<GameSkipSnapshot> Observe(GameSkipHandle) const;
     std::optional<GameSkipControlSnapshot> ObserveControl(GameSkipControlHandle) const;
     std::vector<ProcessHandle> RenderProcesses() const;
@@ -100,6 +105,13 @@ public:
     std::optional<bool> ControlIsWait(GameSkipControlHandle) const;
     std::optional<bool> ControlIsEscape(GameSkipControlHandle) const;
     bool UsesScheduler(const NativeProcessScheduler&) const noexcept;
+    // Talk's skip-fade branch writes saved target0 color, not live Fade or target1.
+    GameSkipStatus SetSavedFadeGoal(ProcessAccess&,GameSkipHandle,std::uint32_t,
+        presentation::native::FadeColor);
+    // Original Talk destructor ORs captured flags into the then-current object.
+    GameSkipStatus MergeFlags(ProcessAccess&,GameSkipHandle,std::uint32_t);
+    bool UsesFadeSystem(const presentation::native::NativeFadeSystem&) const noexcept;
+    bool UsesInput(const GameSkipInputSource&) const noexcept;
     // ProcEvent::FadeEnd's writes to the current skip object: flags|=2, and
     // black saved goals while skipping. Does not change the skip state.
     GameSkipStatus PrepareEventFadeEnd(ProcessAccess&,GameSkipHandle,

@@ -5,6 +5,13 @@ struct FileControllerIdentity final {const std::uint32_t serial;};
 struct FileObjectIdentity final {const std::uint32_t serial;};
 using FileControllerHandle=std::shared_ptr<const FileControllerIdentity>;
 using FileObjectHandle=std::shared_ptr<const FileObjectIdentity>;
+// Native sidecars for one concrete data generation. The lower object retains
+// them through allocator Free and drops them when its data fields are cleared
+// or replaced. They do not acquire game references or perform game Cleanup.
+class FileDataResource {
+public:
+    virtual ~FileDataResource()=default;
+};
 // Logical resource words are resolved by their concrete allocator/subtype owner,
 // never dereferenced as host addresses. Zero is an explicitly null field.
 struct CarriedFileObject {
@@ -13,6 +20,11 @@ struct CarriedFileObject {
     std::uint16_t references{};
     std::uint8_t cache_level{},priority{};
     std::uint32_t deleting_destructor{},cleanup{};
+    std::uint32_t setup{},is_delay{};
+    std::uint32_t get_allocator{},get_align{};
+};
+struct FileObjectMethods {
+    std::uint32_t deleting_destructor{},setup{},cleanup{},get_allocator{},get_align{},is_delay{};
 };
 struct CarriedFileController {
     // Complete cache order, distinct hash insertion order (a permutation), and
@@ -26,6 +38,7 @@ struct FileObjectObservation {
     FileControllerHandle controller;
     CarriedFileObject fields;
     FileObjectLife life{};
+    std::uint64_t data_revision{1};
     bool cache_linked{},async_linked{},base_destructor_entered{};
 };
 struct FileControllerObservation {
@@ -52,6 +65,21 @@ public:
     FileControllerStatus Restore(const CarriedFileController&,FileControllerHandle&,
         std::vector<FileObjectHandle>&,runtime::native::ProcessAccess* =nullptr);
     FileControllerStatus PublishAbsent(runtime::native::ProcessAccess* =nullptr);
+    // FileObject constructor fields with explicitly supplied subtype methods.
+    // Construction creates a live, detached object; EntryFile owns registration.
+    FileControllerStatus ConstructObject(const FileObjectMethods&,FileObjectHandle&,runtime::native::ProcessAccess* =nullptr);
+    FileControllerStatus WriteUnlinkedPath(FileObjectHandle,std::string_view,runtime::native::ProcessAccess* =nullptr);
+    FileControllerStatus RegisterUnlinked(FileControllerHandle,FileObjectHandle,runtime::native::ProcessAccess* =nullptr);
+    FileControllerStatus QueueUnlinked(FileControllerHandle,FileObjectHandle,runtime::native::ProcessAccess* =nullptr);
+    // Original FinishAsync queue preference: move before the first queued read,
+    // but not ahead of an already-reading head. This does not choose priority,
+    // start a read, or change any queued/reading flags.
+    FileControllerStatus PrioritizeAsync(FileControllerHandle,FileObjectHandle,
+        runtime::native::ProcessAccess* =nullptr);
+    bool UsesScheduler(const runtime::native::NativeProcessScheduler&) const noexcept;
+    bool OwnsLiveData(FileObjectHandle,std::uint32_t data,std::uint64_t revision) const noexcept;
+    FileControllerStatus RetainDataResource(FileObjectHandle,std::uint32_t data,std::uint64_t revision,
+        std::shared_ptr<const FileDataResource>,runtime::native::ProcessAccess* =nullptr);
     // Carried field writer for an existing live object. Membership, path and
     // virtual identity stay fixed; concrete Setup/Cleanup owners may use it.
     FileControllerStatus WriteFields(FileObjectHandle,const CarriedFileObject&,

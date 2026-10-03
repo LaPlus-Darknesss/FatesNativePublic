@@ -7,16 +7,16 @@
 #include <utility>
 
 namespace fates::runtime::native {
-namespace {
-std::uint8_t Command(const ProcessDescriptor& d) {return static_cast<std::uint8_t>(d.command);}
-std::int16_t LowShort(std::uint32_t v) {return std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(v));}
-std::uint32_t MillisecondFrames(std::int32_t value) {
+std::uint32_t ProcessMillisecondsToFrames(std::int32_t value) noexcept {
     // VCVT.F32.S32, VMUL.F32 with the executable's 0x3d75c28f, then
     // VCVT.S32.F32 (toward zero). The product fits signed32 for every input.
     const float source=static_cast<float>(value);
     const float frames=source*std::bit_cast<float>(std::uint32_t{0x3d75c28f});
     return static_cast<std::uint32_t>(static_cast<std::int32_t>(frames));
 }
+namespace {
+std::uint8_t Command(const ProcessDescriptor& d) {return static_cast<std::uint8_t>(d.command);}
+std::int16_t LowShort(std::uint32_t v) {return std::bit_cast<std::int16_t>(static_cast<std::uint16_t>(v));}
 bool BaseNoop(std::uint32_t target) {
     return target==0x4ee0b8 || target==0x4edef8 || target==0x4ee170 || target==0x4ee318;
 }
@@ -81,7 +81,7 @@ struct NativeProcessScheduler::Impl {
         std::optional<std::string> name,bool blocking,const ProcessType& type,ProcessHandle& result,bool root=false) {
         if(auto s=Mutable();s!=ProcessStatus::Ready)return s;
         auto* p=Get(parent);
-        if(!root && (!p || !p->view.linked || (p->view.flags&1)))return ProcessStatus::InvalidHandle;
+        if(!root && (!p || (!p->view.linked && !(in_callback && p->view.constructing)) || (p->view.flags&1)))return ProcessStatus::InvalidHandle;
         if(!program)return ProcessStatus::InvalidProgram;
         if(!name || name->find('\0')!=std::string::npos)return ProcessStatus::InvalidName;
         if(serial==std::numeric_limits<std::uint64_t>::max())return ProcessStatus::IdentityExhausted;
@@ -98,9 +98,48 @@ struct NativeProcessScheduler::Impl {
         }
         result=v.identity;nodes.emplace(serial,std::move(node));return ProcessStatus::Ready;
     }
+    ProcessStatus ConstructUnattached(const ProcessType& type,ProcessHandle& out) {
+        if(!in_callback)return ProcessStatus::InvalidCall;
+        if(auto status=Mutable();status!=ProcessStatus::Ready)return status;
+        if(serial==std::numeric_limits<std::uint64_t>::max())return ProcessStatus::IdentityExhausted;
+        auto node=std::make_unique<Node>();auto& value=node->view;
+        value.identity=std::make_shared<const ProcessIdentity>(ProcessIdentity{++serial});
+        // 0010A2A8 writes null program/name/tree pointers, zero flags/counters,
+        // and the base {0,0} persistent pair. +2C name hash is not initialized.
+        value.constructing=true;value.name_hash_known=false;node->type=type;
+        out=value.identity;nodes.emplace(serial,std::move(node));return ProcessStatus::Ready;
+    }
+    ProcessStatus AttachConstructed(ProcessHandle handle,ProcessHandle parent,
+        std::shared_ptr<const ProcessProgram> program,std::string name,bool blocking) {
+        if(!in_callback)return ProcessStatus::InvalidCall;
+        if(auto status=Mutable();status!=ProcessStatus::Ready)return status;
+        auto* node=Get(handle);auto* p=Get(parent);
+        if(!node || !node->view.constructing || node->view.linked || node->view.root ||
+            (node->view.flags&1u) || !p || p==node ||
+            (!p->view.linked && !p->view.constructing) || (p->view.flags&1u))return ProcessStatus::InvalidHandle;
+        if(!program)return ProcessStatus::InvalidProgram;
+        if(name.find('\0')!=std::string::npos)return ProcessStatus::InvalidName;
+        // Refuse a native cycle before publishing any links. This bounds invalid
+        // input, not an assertion that the original checks an unsafe parent.
+        for(auto* ancestor=p;ancestor;ancestor=Get(ancestor->view.parent))
+            if(ancestor==node)return ProcessStatus::InvalidHandle;
+        auto& value=node->view;
+        value.older=p->view.child;
+        if(auto* old=Get(value.older))old->view.newer=handle;
+        p->view.child=handle;value.parent=parent;
+        value.name=std::move(name);value.name_hash=0;
+        if(!value.name->empty()) {
+            value.name_hash=HashIdentifierExact(*value.name).nameHash;
+            if(!value.name_hash)value.name_hash=1;
+        }
+        value.name_hash_known=true;value.program=std::move(program);value.pc=0;
+        value.persistent_target=12;value.persistent_adjustment=1;
+        if(blocking){++p->view.blocking_children;value.flags|=2u;}
+        value.constructing=false;value.linked=true;return ProcessStatus::Ready;
+    }
     ProcessStatus Next(const ProcessHandle& h,bool immediate) {
         if(auto s=Mutable();s!=ProcessStatus::Ready)return s;
-        auto* n=Get(h);if(!n)return ProcessStatus::InvalidHandle;
+        auto* n=Get(h);if(!n || n->view.constructing)return ProcessStatus::InvalidHandle;
         const auto& d=n->view.program->descriptors();
         if(n->view.pc>=d.size())return ProcessStatus::InvalidProgram;
         if(Command(d[n->view.pc])!=0)++n->view.pc;
@@ -108,7 +147,7 @@ struct NativeProcessScheduler::Impl {
     }
     ProcessStatus Jump(const ProcessHandle& h,std::uint32_t label,bool immediate) {
         if(auto s=Mutable();s!=ProcessStatus::Ready)return s;
-        auto* n=Get(h);if(!n)return ProcessStatus::InvalidHandle;
+        auto* n=Get(h);if(!n || n->view.constructing)return ProcessStatus::InvalidHandle;
         const auto& d=n->view.program->descriptors();
         for(std::size_t i=0;i<d.size() && Command(d[i])!=0;++i)
             if(Command(d[i])==4 && d[i].argument==label) {n->view.pc=i;break;}
@@ -116,7 +155,7 @@ struct NativeProcessScheduler::Impl {
     }
     ProcessStatus Wait(const ProcessHandle& h,std::uint32_t frames) {
         if(auto s=Mutable();s!=ProcessStatus::Ready)return s;
-        auto* n=Get(h);if(!n)return ProcessStatus::InvalidHandle;
+        auto* n=Get(h);if(!n || n->view.constructing)return ProcessStatus::InvalidHandle;
         n->view.wait_frames=LowShort(frames);return ProcessStatus::Ready;
     }
     void NextInternal(Node& n) {
@@ -142,10 +181,10 @@ struct NativeProcessScheduler::Impl {
             f.call.arguments={a,command==18?b:0};f.call.argument_count=command==18?2:1;
         }
     }
-    ProcessStatus AdmitService(const ProcessCall& call) const {
+    ProcessStatus AdmitService(const ProcessCall& call,bool nested_construction=false) const {
         if(call.kind!=ProcessCallKind::Service || call.argument_count>call.arguments.size())return ProcessStatus::InvalidCall;
         auto* n=Get(call.process);
-        if(!n || !n->view.linked || (n->view.flags&1))return ProcessStatus::InvalidHandle;
+        if(!n || (!n->view.linked && !(nested_construction && n->view.constructing)) || (n->view.flags&1))return ProcessStatus::InvalidHandle;
         return ProcessStatus::Ready;
     }
     void Service(ProcessCall call) {
@@ -195,7 +234,7 @@ struct NativeProcessScheduler::Impl {
                 else if(c==3)JumpInternal(*n,d.argument);
                 else if(c==4)NextInternal(*n);
                 else if(c==5 || c==6 || c==7) {
-                    if(c!=7)n->view.wait_frames=LowShort(c==5?MillisecondFrames(std::bit_cast<std::int32_t>(d.argument)):d.argument);
+                    if(c!=7)n->view.wait_frames=LowShort(c==5?ProcessMillisecondsToFrames(std::bit_cast<std::int32_t>(d.argument)):d.argument);
                     NextInternal(*n);f.stage=3;
                 } else if(c==14) {
                     n->view.persistent_target=d.target;n->view.persistent_adjustment=d.adjustment;NextInternal(*n);
@@ -245,7 +284,7 @@ struct NativeProcessScheduler::Impl {
             break;
         case Kind::Callback:
             if(f.pending_call) {
-                if(auto s=AdmitService(*f.pending_call);s!=ProcessStatus::Ready)return s;
+                if(auto s=AdmitService(*f.pending_call,true);s!=ProcessStatus::Ready)return s;
                 auto call=std::move(*f.pending_call);f.pending_call.reset();Service(std::move(call));break;
             }
             if(f.deletion_requested) {
@@ -319,7 +358,7 @@ ProcessStatus NativeProcessScheduler::Create(ProcessHandle p,std::shared_ptr<con
 ProcessStatus NativeProcessScheduler::Next(ProcessHandle h,bool immediate) {return impl_->in_run?ProcessStatus::Busy:impl_->Next(h,immediate);}
 ProcessStatus NativeProcessScheduler::Jump(ProcessHandle h,std::uint32_t label,bool immediate) {return impl_->in_run?ProcessStatus::Busy:impl_->Jump(h,label,immediate);}
 ProcessStatus NativeProcessScheduler::WaitFrame(ProcessHandle h,std::uint32_t frames) {return impl_->in_run?ProcessStatus::Busy:impl_->Wait(h,frames);}
-ProcessStatus NativeProcessScheduler::WaitMilliseconds(ProcessHandle h,std::int32_t value) {return WaitFrame(h,MillisecondFrames(value));}
+ProcessStatus NativeProcessScheduler::WaitMilliseconds(ProcessHandle h,std::int32_t value) {return WaitFrame(h,ProcessMillisecondsToFrames(value));}
 ProcessHandle NativeProcessScheduler::FindNext(ProcessHandle h,bool children) const {
     auto* n=impl_->Get(h);if(!n)return {};
     for(;;) {
@@ -405,4 +444,12 @@ ProcessStatus ProcessAccess::Jump(ProcessHandle h,std::uint32_t l,bool i) {retur
 ProcessStatus ProcessAccess::WaitFrame(ProcessHandle h,std::uint32_t f) {return scheduler_.impl_->Wait(h,f);}
 ProcessStatus ProcessAccess::Create(ProcessHandle p,std::shared_ptr<const ProcessProgram> d,std::optional<std::string> n,
     bool b,const ProcessType& t,ProcessHandle& h) {return scheduler_.impl_->Create(p,std::move(d),std::move(n),b,t,h);}
+ProcessStatus ProcessAccess::ConstructUnattached(const ProcessType& type,ProcessHandle& out) {
+    return scheduler_.impl_->ConstructUnattached(type,out);
+}
+ProcessStatus ProcessAccess::AttachConstructed(ProcessHandle handle,ProcessHandle parent,
+    std::shared_ptr<const ProcessProgram> program,std::string name,bool blocking) {
+    return scheduler_.impl_->AttachConstructed(std::move(handle),std::move(parent),std::move(program),std::move(name),blocking);
+}
+
 }

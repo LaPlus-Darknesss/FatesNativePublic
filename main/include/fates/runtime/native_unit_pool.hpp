@@ -1,5 +1,6 @@
 #pragma once
 #include "fates/runtime/native_game_state.hpp"
+#include "fates/runtime/native_archive_identifiers.hpp"
 #include <span>
 namespace fates::runtime::native {
 class DefinitionStore;
@@ -18,6 +19,29 @@ UnitPersonLookupStatus BindUnitPersonRecord(const DefinitionStore&,UnitState&,co
 // PROVEN 004F5D24: ascending250-slot scan, Force9 exclusion, IsUnique before
 // Person identity comparison. No Force order, map/HP or phase dependency.
 UnitPersonLookupResult FindUnitFromPerson(const DefinitionStore&,const NativeGameState&,const PersonRecordReference&);
+enum class PlayerUnitLookupStatus : std::uint8_t {
+    Ready,MissingPlayerFlag,RetiredRegistry,StalePlayerFlag,InvalidPlayerFlag,
+    InvalidUnit,MissingPerson,StalePerson,MissingJob,UnknownPersonArchives
+};
+struct PlayerUnitLookupResult {
+    PlayerUnitLookupStatus status{PlayerUnitLookupStatus::Ready};
+    std::optional<std::uint16_t> slot,unavailable_slot;
+    std::uint16_t slots_examined{},uniqueness_checks{},download_checks{},force_checks{},flag_checks{};
+};
+// UnitPool::GetPlayer's shared lazy flag cache and ascending250-slot scan.
+// This is distinct from Force-list lookup and Command.cmb's female-first PID
+// helper. Construct once for a fresh runtime scope; retain it across calls.
+// The registry must outlive the selector. A successfully cached scalar mask
+// survives the source archive's release, just as the original static does.
+class NativePlayerUnitSelector final {
+public:
+    explicit NativePlayerUnitSelector(const NativeArchiveIdentifiers& identifiers):identifiers_(identifiers) {}
+    PlayerUnitLookupResult Find(const DefinitionStore&,const NativeGameState&);
+    std::optional<std::uint64_t> cached_mask() const noexcept {return mask_;}
+private:
+    const NativeArchiveIdentifiers& identifiers_;
+    std::optional<std::uint64_t> mask_;
+};
 enum class UnitClearEffect : std::uint8_t {
     RemoveEditPrivateFlag,DeleteEdit,DeleteFamily,DestroyActor,DeleteOrdinaryPoints,
     ClearOrdinaryCount,DeleteChapterPoints,ClearChapterCount,ResetFields,

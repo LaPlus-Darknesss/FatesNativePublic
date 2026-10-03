@@ -13,9 +13,10 @@ using namespace runtime::native;
 namespace {
 constexpr std::uint32_t Sweep=0x3cf924,ControllerSweep=0x11fbcc,Delete=0x11fa44,
     Delayed=0x11fb34,RemoveAsync=0x12a168,BaseDestructor=0x17855c,
-    DeletingDestructor=0x178508,RawDestructor=0x1caa90,RawCleanup=0x1caa8c,RawSetup=0x1caa88;
+    DeletingDestructor=0x178508,RawDestructor=0x1caa90,RawCleanup=0x1caa8c,RawSetup=0x1caa88,
+    Touch=0x115a18,RawIsDelay=0x50a52c;
 constexpr std::array Targets{Sweep,ControllerSweep,Delete,Delayed,RemoveAsync,
-    BaseDestructor,DeletingDestructor,RawDestructor,RawCleanup,RawSetup};
+    BaseDestructor,DeletingDestructor,RawDestructor,RawCleanup,RawSetup,Touch,RawIsDelay};
 ProcessCall Service(ProcessHandle h,std::uint32_t target,std::initializer_list<std::uint32_t> args={}) {
     ProcessCall c;c.process=std::move(h);c.kind=ProcessCallKind::Service;c.target=target;
     c.argument_count=static_cast<std::uint8_t>(args.size());std::copy(args.begin(),args.end(),c.arguments.begin());return c;
@@ -30,6 +31,7 @@ struct NativeFileController::State {
     };
     struct Object {
         FileObjectObservation row;
+        std::vector<std::shared_ptr<const FileDataResource>> resources;
     };
     std::weak_ptr<NativeProcessScheduler> scheduler;
     std::optional<std::shared_ptr<Controller>> current;
@@ -72,7 +74,17 @@ struct NativeFileController::Continuation final:ProcessContinuation {
     }
     ProcessCallbackStep Step(ProcessAccess& access) override {
         auto s=state->scheduler.lock();if(!s || !access.BelongsTo(*s))return ProcessCallbackStep::Blocked();
-        if(call.target==RawCleanup || call.target==RawSetup)return ProcessCallbackStep::Return();
+        if(call.target==RawCleanup || call.target==RawSetup || call.target==RawIsDelay)return ProcessCallbackStep::Return();
+        if(call.target==Touch) {
+            if(!state->current)return ProcessCallbackStep::Blocked();
+            const auto current=*state->current;
+            if(state->Member(current,object)) {
+                const auto at=std::find(current->cache.begin(),current->cache.end(),object->row.identity->serial);
+                if(at==current->cache.end())return ProcessCallbackStep::Blocked();
+                current->cache.splice(current->cache.end(),current->cache,at);
+            }
+            return ProcessCallbackStep::Return();
+        }
         if(call.target==BaseDestructor || call.target==DeletingDestructor || call.target==RawDestructor) {
             if(stage==0) {
                 // Changing to the FileObject vtable occurs before allocator Free.
@@ -86,6 +98,7 @@ struct NativeFileController::Continuation final:ProcessContinuation {
             }
             if(stage==1) {
                 auto& f=object->row.fields;f.allocator=0;f.data=0;f.size=0;
+                object->resources.clear();
                 if(call.target==BaseDestructor)return ProcessCallbackStep::Return(object->row.identity->serial);
                 stage=2;return Invoke(0x2fdce4,{object->row.identity->serial});
             }
@@ -203,12 +216,83 @@ FileControllerStatus NativeFileController::Restore(const CarriedFileController& 
 FileControllerStatus NativeFileController::PublishAbsent(ProcessAccess* a) {
     auto s=state_->Mutable(a);if(s==FileControllerStatus::Ready)state_->current=std::shared_ptr<State::Controller>{};return s;
 }
+FileControllerStatus NativeFileController::ConstructObject(const FileObjectMethods& methods,FileObjectHandle& out,ProcessAccess* a) {
+    using S=FileControllerStatus;if(auto s=state_->Mutable(a);s!=S::Ready)return s;
+    if(state_->object_serial==std::numeric_limits<std::uint32_t>::max())return S::IdentityExhausted;
+    auto o=std::make_shared<State::Object>();o->row.identity=std::make_shared<FileObjectIdentity>(++state_->object_serial);
+    auto& f=o->row.fields;f.priority=1;f.deleting_destructor=methods.deleting_destructor;
+    f.setup=methods.setup;f.cleanup=methods.cleanup;f.get_allocator=methods.get_allocator;
+    f.get_align=methods.get_align;f.is_delay=methods.is_delay;
+    state_->objects.emplace(o->row.identity->serial,o);out=o->row.identity;return S::Ready;
+}
+FileControllerStatus NativeFileController::WriteUnlinkedPath(FileObjectHandle h,std::string_view path,ProcessAccess* a) {
+    using S=FileControllerStatus;if(auto s=state_->Mutable(a);s!=S::Ready)return s;
+    auto o=state_->Get(h);
+    if(!o || o->row.life!=FileObjectLife::Live || o->row.cache_linked || o->row.async_linked)return S::InvalidHandle;
+    if(path.size()>=0x50 || path.find('\0')!=std::string_view::npos)return S::InvalidSnapshot;
+    o->row.fields.path=path;return S::Ready;
+}
+FileControllerStatus NativeFileController::RegisterUnlinked(FileControllerHandle h,FileObjectHandle handle,ProcessAccess* a) {
+    using S=FileControllerStatus;if(auto s=state_->Mutable(a);s!=S::Ready)return s;
+    auto c=state_->Get(h);auto o=state_->Get(handle);
+    if(!c || !o || o->row.life!=FileObjectLife::Live || o->row.cache_linked || o->row.async_linked)return S::InvalidHandle;
+    c->index.Append(o->row.fields.path.c_str(),handle->serial);c->cache.push_back(handle->serial);
+    o->row.controller=c->identity;o->row.cache_linked=true;return S::Ready;
+}
+FileControllerStatus NativeFileController::QueueUnlinked(FileControllerHandle h,FileObjectHandle handle,ProcessAccess* a) {
+    using S=FileControllerStatus;if(auto s=state_->Mutable(a);s!=S::Ready)return s;
+    auto c=state_->Get(h);auto o=state_->Get(handle);
+    if(!state_->Member(c,o) || o->row.async_linked)return S::InvalidHandle;
+    c->async.push_back(handle->serial);o->row.async_linked=true;return S::Ready;
+}
+FileControllerStatus NativeFileController::PrioritizeAsync(FileControllerHandle handle,
+    FileObjectHandle object,ProcessAccess* access) {
+    using S=FileControllerStatus;
+    if(auto status=state_->Mutable(access);status!=S::Ready)return status;
+    auto controller=state_->Get(handle);auto entry=state_->Get(object);
+    if(!controller || !entry || entry->row.life!=FileObjectLife::Live)return S::InvalidHandle;
+    if(entry->row.controller!=handle || !entry->row.async_linked)return S::Ready;
+    auto found=std::find(controller->async.begin(),controller->async.end(),object->serial);
+    if(found==controller->async.end())return S::InvalidHandle;
+    if(found==controller->async.begin())return S::Ready;
+    const auto head=state_->ObjectAt(controller->async.front());
+    if(!head)return S::InvalidHandle;
+    auto before=controller->async.begin();
+    if(head->row.fields.flags&0x40000000u)++before;
+    if(before!=found)controller->async.splice(before,controller->async,found);
+    return S::Ready;
+}
+bool NativeFileController::UsesScheduler(const NativeProcessScheduler& scheduler) const noexcept {
+    return state_->scheduler.lock().get()==&scheduler;
+}
+bool NativeFileController::OwnsLiveData(FileObjectHandle h,std::uint32_t data,std::uint64_t revision) const noexcept {
+    auto o=state_->Get(h);
+    return state_->Live() && o && o->row.life==FileObjectLife::Live && data &&
+        o->row.fields.data==data && o->row.data_revision==revision;
+}
+FileControllerStatus NativeFileController::RetainDataResource(FileObjectHandle h,std::uint32_t data,
+    std::uint64_t revision,std::shared_ptr<const FileDataResource> resource,ProcessAccess* a) {
+    using S=FileControllerStatus;if(auto s=state_->Mutable(a);s!=S::Ready)return s;
+    auto o=state_->Get(h);
+    if(!o || o->row.life!=FileObjectLife::Live || o->row.fields.data!=data ||
+        o->row.data_revision!=revision || !resource)return S::InvalidHandle;
+    if(std::find(o->resources.begin(),o->resources.end(),resource)==o->resources.end())
+        o->resources.push_back(std::move(resource));
+    return S::Ready;
+}
 FileControllerStatus NativeFileController::WriteFields(FileObjectHandle h,const CarriedFileObject& f,ProcessAccess* a) {
     using S=FileControllerStatus;if(auto s=state_->Mutable(a);s!=S::Ready)return s;
     auto o=state_->Get(h);if(!o || o->row.life!=FileObjectLife::Live)return S::InvalidHandle;
     const auto& old=o->row.fields;
-    if(!ValidFields(f) || f.path!=old.path || f.deleting_destructor!=old.deleting_destructor || f.cleanup!=old.cleanup)return S::InvalidSnapshot;
-    o->row.fields=f;return S::Ready;
+    if(!ValidFields(f) || f.path!=old.path || f.deleting_destructor!=old.deleting_destructor ||
+        f.cleanup!=old.cleanup || f.setup!=old.setup || f.is_delay!=old.is_delay ||
+        f.get_allocator!=old.get_allocator || f.get_align!=old.get_align)return S::InvalidSnapshot;
+    const bool replaced=f.data!=old.data || f.size!=old.size;
+    if(replaced) {
+        if(o->row.data_revision==std::numeric_limits<std::uint64_t>::max())return S::IdentityExhausted;
+        ++o->row.data_revision;
+    }
+    o->row.fields=f;if(replaced)o->resources.clear();return S::Ready;
 }
 std::optional<FileControllerObservation> NativeFileController::Observe(FileControllerHandle h) const {
     auto c=state_->Get(h);if(!state_->Live() || !c)return {};
@@ -254,7 +338,8 @@ std::unique_ptr<ProcessContinuation> NativeFileController::Begin(const ProcessCa
     } else {
         if(std::find(Targets.begin(),Targets.end(),c.target)==Targets.end() || c.argument_count!=1 ||
             !(p->object=state_->ObjectAt(c.arguments[0])) || p->object->row.life==FileObjectLife::Destroyed)return {};
-        if(c.target==Delayed && p->object->row.life!=FileObjectLife::Live)return {};
+        if((c.target==Delayed || c.target==Touch || c.target==RawIsDelay ||
+            c.target==RawSetup || c.target==RawCleanup) && p->object->row.life!=FileObjectLife::Live)return {};
         if((c.target==BaseDestructor || c.target==DeletingDestructor || c.target==RawDestructor) &&
             p->object->row.life!=FileObjectLife::Destroying)return {};
     }

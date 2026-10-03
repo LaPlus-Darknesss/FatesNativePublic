@@ -86,7 +86,14 @@ SupportProviderStatus RestoreCarriedSupportSnapshot(rn::NativeRuntime& r,const C
         if(f.family_state)for(const auto& parent:f.family_state->parents)
             for(const auto& id:{parent.person,parent.father,parent.mother})
                 if(id && !r.definitions.FindPerson(*id))return SupportProviderStatus::MissingDefinition;
-        lineage[slot]=rn::PlanUnitLineageRestore(r.definitions,u,{f.family_state,f.edit_state});
+        rn::UnitLineageSnapshot carried{f.family_state,f.edit_state};
+        // This provider supplies support facts, not a replacement Edit name.
+        // Preserve unrelated carried data on the SAME currently present Edit.
+        // A null Edit, new Person, or unknown prior state cannot inherit it.
+        if(f.edit_state&&u.lineage.bound&&u.lineage.person_id==u.person_id&&u.lineage.value.edit) {
+            carried.edit_name=u.lineage.value.edit_name;carried.edit_face=u.lineage.value.edit_face;
+        }
+        lineage[slot]=rn::PlanUnitLineageRestore(r.definitions,u,carried);
         if(lineage[slot].status==rn::UnitCapabilityStatus::MissingPersonality)return SupportProviderStatus::MissingPersonalityDefinition;
         if(lineage[slot].status==rn::UnitCapabilityStatus::RevisionExhausted)return SupportProviderStatus::RevisionExhausted;
         if(lineage[slot].status!=rn::UnitCapabilityStatus::Ok)return SupportProviderStatus::MissingDefinition;

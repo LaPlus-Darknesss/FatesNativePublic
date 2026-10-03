@@ -56,6 +56,9 @@ struct UnitState {
     // Unbound carried state must remain unknown until its owning writer supplies it.
     std::optional<std::uint8_t> ai_activity;
     std::optional<std::uint8_t> ai_band;
+    // Current Unit+136, supplied by its creating/carried owner. Unknown is not
+    // a default zero capture-name index; Unit clear discards this observation.
+    std::optional<std::uint8_t> capture_name_index;
     struct AttackRestrictions {
         bool bound{};
         std::optional<std::uint16_t> excluded_person; // null reference differs from valid Person ID zero

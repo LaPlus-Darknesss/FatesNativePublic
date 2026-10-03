@@ -9,6 +9,9 @@
 #include <vector>
 
 namespace fates::runtime::native {
+// Shared original signed-ms -> binary32 * 0x3D75C28F -> signed32 conversion.
+// ProcInst waits and TalkUtil::ProcWait use the same operation, not integer /16.
+std::uint32_t ProcessMillisecondsToFrames(std::int32_t) noexcept;
 // The five original descriptor words. Only the low byte of command is dispatched.
 struct ProcessDescriptor {
     std::uint32_t command{}, argument{}, argument2{}, target{}, adjustment{};
@@ -59,6 +62,11 @@ struct ProcessObservation {
     std::uint8_t flags{}, blocking_children{};
     std::int16_t wait_frames{};
     bool linked{}, root{};
+    // Original ProcInst construction precedes Create/attachment. Only the
+    // scoped ProcessAccess API can allocate this state. It is never traversed
+    // from roots until attachment; its name hash is constructor-untouched.
+    bool constructing{};
+    bool name_hash_known{true};
 };
 class NativeProcessScheduler;
 class ProcessAccess;
@@ -161,6 +169,13 @@ public:
     ProcessStatus WaitFrame(ProcessHandle,std::uint32_t);
     ProcessStatus Create(ProcessHandle,std::shared_ptr<const ProcessProgram>,
         std::optional<std::string>,bool,const ProcessType&,ProcessHandle&);
+    // Original base constructor + later Create attachment, without creating a
+    // second scheduler. Detached objects are owned but not runnable; only nested
+    // service calls may use them while construction is in progress. Attach does
+    // not repeat member construction and preserves pre-attachment children.
+    ProcessStatus ConstructUnattached(const ProcessType&,ProcessHandle&);
+    ProcessStatus AttachConstructed(ProcessHandle,ProcessHandle,
+        std::shared_ptr<const ProcessProgram>,std::string,bool);
 private:
     friend class NativeProcessScheduler;
     explicit ProcessAccess(NativeProcessScheduler& scheduler):scheduler_(scheduler){}

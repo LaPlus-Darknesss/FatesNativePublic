@@ -3,6 +3,7 @@
 #include "fates/runtime/native_current_item_eligibility.hpp"
 #include "fates/unit/native_unit_semantics.hpp"
 #include <limits>
+#include <algorithm>
 
 namespace fates::runtime::native {
 namespace {
@@ -36,6 +37,9 @@ UnitLineageRestorePlan PlanUnitLineageRestore(const DefinitionStore& d,const Uni
     auto fail=[&](S status){out.status=status;return out;};
     if(!u.occupied)return fail(S::InvalidUnit);
     if(!d.FindPerson(u.person_id))return fail(S::MissingDefinition);
+    if(input.edit_face&&!input.edit)return fail(S::InvalidEditState);
+    if(input.edit_name&&(!input.edit||std::find(input.edit_name->begin(),input.edit_name->end(),char16_t{})==input.edit_name->end()))
+        return fail(S::InvalidEditState);
     if(input.edit&&ValidateEdit(d,*input.edit)!=S::Ok)return fail(S::MissingPersonality);
     if(input.family)for(const auto& parent:input.family->parents) {
         for(const auto& id:{parent.person,parent.father,parent.mother})if(id&&!d.FindPerson(*id))return fail(S::MissingDefinition);

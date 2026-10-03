@@ -6,9 +6,18 @@
 namespace fates::runtime::native {
 // Shared carried Family/Edit facts. Support and capability queries consume this
 // same owner; null payloads are known absence, distinct from an unbound state.
+struct UnitEditFaceState {
+    std::uint8_t gender{},body_type{},face_index{}; // original Edit20/21/22
+    bool operator==(const UnitEditFaceState&) const=default;
+};
 struct UnitLineageSnapshot {
     std::optional<fates::support::native::SupportFamilyState> family;
     std::optional<fates::support::native::SupportEditState> edit;
+    // The same current Edit whose boon/bane facts are above. Unknown name is
+    // distinct from known empty. Original SetName owns13 raw UTF16 words;
+    // no host wchar_t, localization, or serialized save layout enters here.
+    std::optional<std::array<char16_t,13>> edit_name;
+    std::optional<UnitEditFaceState> edit_face;
     bool operator==(const UnitLineageSnapshot&) const=default;
 };
 struct NativeUnitLineageState {

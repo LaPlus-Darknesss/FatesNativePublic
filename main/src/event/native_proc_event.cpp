@@ -32,6 +32,7 @@ struct NativeProcEvent::State {
     std::shared_ptr<const NativeUnitEventQueries> units;
     std::shared_ptr<map::native::NativeCameraWait> camera;
     std::shared_ptr<NativeEventCamera> camera_commands;
+    std::shared_ptr<NativeEventTalk> talk;
     std::map<std::uint64_t,Row> rows;
     ProcessHandle current;
     std::uint64_t started{},destroyed{};
@@ -74,7 +75,7 @@ struct NativeProcEvent::State {
         // ownership. Type0 parameters require initialized VM argument words;
         // this original CreateBind overload supplies none, so they are refused.
         Row row;
-        if(PhaseEventVm::CreateAttachedFunctionWithServices(function,{},256,session,{queries,flags,units,camera,camera_commands},row.vm)!=PhaseVmStatus::Ready)return S::VmRefused;
+        if(PhaseEventVm::CreateAttachedFunctionWithServices(function,{},256,session,{queries,flags,units,camera,camera_commands,talk},row.vm)!=PhaseVmStatus::Ready)return S::VmRefused;
         GameSkipControlHandle control;
         const auto captured=access?skip->Capture(*access,control):skip->Capture(control);
         if(captured!=GameSkipStatus::Ready)return S::UnknownState;
@@ -120,7 +121,7 @@ struct NativeProcEvent::State {
         std::shared_ptr<const NativeEventFlagCommands> f) {
         if(auto status=Mutable(access);status!=S::Ready)return status;
         if(current)return S::AlreadyActive;
-        if(!NativeEventServices{q,f,units,camera,camera_commands}.UsesOneRuntime())return S::MismatchedDomain;
+        if(!NativeEventServices{q,f,units,camera,camera_commands,talk}.UsesOneRuntime())return S::MismatchedDomain;
         if((q && q->Validate()!=PhaseQueryStatus::Ok) ||
             (f && f->Validate()!=EventFlagStatus::Ok) ||
             (units && units->Validate()!=UnitEventQueryStatus::Ok))return S::StaleNativeContext;
@@ -149,6 +150,10 @@ struct NativeProcEvent::Continuation final:ProcessContinuation {
             if(state->current!=call.process)return ProcessCallbackStep::Blocked();
             const ProcEventVmAccess vm_access(access,state->current);
             const auto result=row->vm->Run(1,vm_access);
+            if(result.status==PhaseVmStatus::NativeCallPending) {
+                const auto nested=row->vm->PendingNativeCall(vm_access);
+                return nested?ProcessCallbackStep::Call(*nested):ProcessCallbackStep::Blocked();
+            }
             if(result.status==PhaseVmStatus::InstructionBudget)return ProcessCallbackStep::Continue();
             if(result.status==PhaseVmStatus::Yielded)return ProcessCallbackStep::Return();
             if(result.status!=PhaseVmStatus::Returned)return ProcessCallbackStep::Blocked();
@@ -243,11 +248,15 @@ S NativeProcEvent::CreateWithServices(std::shared_ptr<NativeProcessScheduler> sc
     if(!services.UsesOneRuntime())return S::MismatchedDomain;
     if(services.camera && !services.camera->UsesScheduler(*scheduler))return S::MismatchedDomain;
     if(services.camera_commands && !services.camera_commands->UsesScheduler(*scheduler))return S::MismatchedDomain;
+    if(services.talk && (!services.talk->UsesScheduler(*scheduler) || !services.talk->CanBindEvent()))return S::MismatchedDomain;
+    if(services.talk && scheduler->busy())return S::Busy;
     auto s=std::make_shared<State>();s->scheduler=scheduler;s->skip=std::move(skip);s->fade=std::move(fade);
     s->binder=std::move(binder);s->delay=std::move(delay);s->session=std::move(session);s->queries=std::move(services.phase);
-    s->flags=std::move(services.flags);s->units=std::move(services.units);s->camera=std::move(services.camera);s->camera_commands=std::move(services.camera_commands);
+    s->flags=std::move(services.flags);s->units=std::move(services.units);s->camera=std::move(services.camera);s->camera_commands=std::move(services.camera_commands);s->talk=std::move(services.talk);
     auto next=std::shared_ptr<NativeProcEvent>(new NativeProcEvent(s));
-    if(!registry->Register(Targets,next))return S::DuplicateBinding;out=std::move(next);return S::Ready;
+    if(!registry->Register(Targets,next))return S::DuplicateBinding;
+    if(s->talk && s->talk->BindEvent(next)!=TalkControlStatus::Ready)return S::MismatchedDomain;
+    out=std::move(next);return S::Ready;
 }
 S NativeProcEvent::CreateTyped(ProcessHandle p,std::uint32_t t,ProcEventInspector i,ProcessHandle& out) {return state_->Typed(nullptr,std::move(p),t,i,out);}
 S NativeProcEvent::CreateTyped(ProcessAccess& a,ProcessHandle p,std::uint32_t t,ProcEventInspector i,ProcessHandle& out) {return state_->Typed(&a,std::move(p),t,i,out);}
@@ -268,7 +277,8 @@ bool NativeProcEvent::UsesRuntime(const NativeRuntime& r) const noexcept {
     return state_->queries && state_->queries->runtime().get()==&r &&
         (!state_->flags || state_->flags->runtime().get()==&r) && (!state_->units || state_->units->runtime().get()==&r) &&
         (!state_->camera || state_->camera->runtime().get()==&r) &&
-        (!state_->camera_commands || state_->camera_commands->runtime().get()==&r);
+        (!state_->camera_commands || state_->camera_commands->runtime().get()==&r) &&
+        (!state_->talk || state_->talk->UsesRuntime(r));
 }
 std::shared_ptr<const ProcessProgram> NativeProcEvent::Program() {
     static const auto program=ProcessProgram::Create({{4,0,0,0,0},{15,1,0,0x3d2940,0},

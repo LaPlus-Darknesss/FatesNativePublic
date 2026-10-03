@@ -112,6 +112,8 @@ PersonDefinition ParsePerson(const std::vector<std::uint8_t>& bytes, std::size_t
     PersonDefinition person{};
     person.bitflags = ReadBytes<8>(bytes, record);
     person.pid = ReadString(bytes, ReadU32(bytes, record + 0x08));
+    person.fid_present = ReadU32(bytes,record+0x0C)!=0;
+    person.name_message_present = ReadU32(bytes,record+0x14)!=0;
     person.fid = ReadString(bytes, ReadU32(bytes, record + 0x0C));
     person.aid = ReadString(bytes, ReadU32(bytes, record + 0x10));
     person.name_message = ReadString(bytes, ReadU32(bytes, record + 0x14));
